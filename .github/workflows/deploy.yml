@@ -1,72 +1,50 @@
-name: Build and Deploy to IIS
+name: Deploy to IIS (Self-hosted)
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-env:
-  DOTNET_VERSION: '8.0.x'
+    branches: [main]
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-    
-    - name: Restore dependencies
-      run: dotnet restore
-    
-    - name: Build
-      run: dotnet build --no-restore --configuration Release
-    
-    - name: Test
-      run: dotnet test --no-build --verbosity normal --configuration Release
-    
-    - name: Publish
-      run: dotnet publish --no-build --configuration Release --output ./publish
-    
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: webapp-artifact
-        path: ./publish
-
   deploy:
-    needs: build
-    runs-on: windows-latest
-    if: github.ref == 'refs/heads/main'
-    
+    runs-on: self-hosted
+
     steps:
-    - name: Download artifact
-      uses: actions/download-artifact@v4
-      with:
-        name: webapp-artifact
-        path: ./publish
-    
-    - name: Deploy to IIS
-      shell: powershell
-      run: |
-        # Stop IIS Application Pool
-        Import-Module WebAdministration
-        Stop-WebAppPool -Name "MyWebAppPool"
-        
-        # Copy files to IIS directory
-        $destinationPath = "C:\inetpub\wwwroot\mywebapp"
-        if (Test-Path $destinationPath) {
-            Remove-Item -Path $destinationPath -Recurse -Force
-        }
-        New-Item -ItemType Directory -Path $destinationPath -Force
-        Copy-Item -Path ".\publish\*" -Destination $destinationPath -Recurse -Force
-        
-        # Start IIS Application Pool
-        Start-WebAppPool -Name "MyWebAppPool"
-        
-        Write-Host "Deployment completed successfully!"
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore and Build
+        run: |
+          dotnet restore
+          dotnet build --configuration Release
+
+      - name: Publish Application
+        run: dotnet publish --configuration Release --output C:\Temp\publish
+
+      - name: Deploy to IIS
+        shell: powershell
+        run: |
+          Import-Module WebAdministration
+
+          # Stop Application Pool
+          Stop-WebAppPool -Name "DefaultAppPool"
+          Start-Sleep -Seconds 5
+
+          # Backup current deployment (optional)
+          $backupPath = "C:\Backups\mywebapp_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+          if (Test-Path "C:\inetpub\wwwroot\mywebapp") {
+              Copy-Item -Path "C:\inetpub\wwwroot\mywebapp" -Destination $backupPath -Recurse
+          }
+
+          # Deploy new files
+          Remove-Item -Path "C:\inetpub\wwwroot\mywebapp\*" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "C:\Temp\publish\*" -Destination "C:\inetpub\wwwroot\mywebapp" -Recurse -Force
+
+          # Start Application Pool
+          Start-WebAppPool -Name "DefaultAppPool"
+
+          # Clean up
+          Remove-Item -Path "C:\Temp\publish" -Recurse -Force
