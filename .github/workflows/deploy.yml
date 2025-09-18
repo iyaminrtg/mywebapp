@@ -1,0 +1,72 @@
+name: Build and Deploy to IIS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Restore dependencies
+      run: dotnet restore
+    
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
+    
+    - name: Test
+      run: dotnet test --no-build --verbosity normal --configuration Release
+    
+    - name: Publish
+      run: dotnet publish --no-build --configuration Release --output ./publish
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: webapp-artifact
+        path: ./publish
+
+  deploy:
+    needs: build
+    runs-on: windows-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: webapp-artifact
+        path: ./publish
+    
+    - name: Deploy to IIS
+      shell: powershell
+      run: |
+        # Stop IIS Application Pool
+        Import-Module WebAdministration
+        Stop-WebAppPool -Name "MyWebAppPool"
+        
+        # Copy files to IIS directory
+        $destinationPath = "C:\inetpub\wwwroot\mywebapp"
+        if (Test-Path $destinationPath) {
+            Remove-Item -Path $destinationPath -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $destinationPath -Force
+        Copy-Item -Path ".\publish\*" -Destination $destinationPath -Recurse -Force
+        
+        # Start IIS Application Pool
+        Start-WebAppPool -Name "MyWebAppPool"
+        
+        Write-Host "Deployment completed successfully!"
